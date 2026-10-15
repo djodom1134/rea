@@ -1,0 +1,28 @@
+vendor_id	product_id	model	family	macos_route	gutenprint_model
+06d3	038b	Mitsubishi CP-3020D/DU/DE	mitsubishi	gutenprint	mitsubishi-cp3020d
+06d3	0394	Mitsubishi CP-9000DW	mitsubishi	gutenprint	mitsubishi-cp9000d
+06d3	0395	Mitsubishi CP-9000DW	mitsubishi	gutenprint	mitsubishi-cp9000d
+06d3	03a5	Mitsubishi CP-9550DW-S	mitsubishi	gutenprint	mitsubishi-cp9550d
+06d3	03aa	Mitsubishi CP-3020DA	mitsubishi	gutenprint	mitsubishi-cp3020da
+06d3	03ae	Mitsubishi CP-9800DW-S	mitsubishi	gutenprint	mitsubishi-cp9800d
+06d3	3b30	Mitsubishi CP-D70DW / CP-D707DW	mitsubishi	gutenprint	mitsubishi-cpd70d
+06d3	3b31	Mitsubishi CP-K60DW-S	mitsubishi	gutenprint	mitsubishi-cpk60d
+06d3	3b36	Mitsubishi CP-D80DW	mitsubishi	gutenprint	mitsubishi-cpd80d
+06d3	3b50	Mitsubishi CP-W5000DW	mitsubishi	vendor-driver	
+06d3	3b60	Mitsubishi CP-D90DW	mitsubishi	gutenprint	mitsubishi-cpd90d
+1343	0002	Citizen CW-01	dnp	gutenprint	citizen-cw-01
+1343	0003	DNP DS40 / Citizen CX	dnp	gutenprint	dnp-ds40
+1343	0004	DNP DS80 / Citizen CX-W / Mitsubishi CP3800DW	dnp	gutenprint	dnp-ds80
+1343	0005	DNP DS-RX1 / Citizen CY	dnp	gutenprint	dnp-dsrx1
+1343	0006	Citizen CW-02 / OP900II	dnp	gutenprint	citizen-cw-02
+1343	0008	DNP DS80DX	dnp	gutenprint	dnp-ds80dx
+1452	8b01	DNP DS620	dnp	gutenprint	dnp-ds620
+1452	9001	DNP DS820	dnp	gutenprint	dnp-ds820
+10ce	0003	Shinko/Sinfonia CHC-S9045	sinfonia	gutenprint-experimental	shinko-chcs9045
+10ce	0007	Shinko/Sinfonia CHC-S1245	sinfonia	gutenprint	shinko-chcs1245
+10ce	000e	Shinko/Sinfonia CHC-S2145	sinfonia	gutenprint	shinko-chcs2145
+10ce	0011	Olmec OP-1000	sinfonia	gutenprint	shinko-chcs2145
+10ce	001e	Ciaat Brava 21	sinfonia	gutenprint	ciaat-brava-21
+054c	01e8	Sony UP-DR150	sony	gutenprint	sony-updr150
+054c	035f	Sony UP-DR200	sony	gutenprint	sony-updr200
+054c	02d4	Sony UP-CX1	sony	gutenprint	sony-upcx1

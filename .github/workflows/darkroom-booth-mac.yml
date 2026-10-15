@@ -1,0 +1,30 @@
+name: Darkroom Booth macOS
+
+on:
+  pull_request:
+    paths:
+      - "apps/darkroom-booth-mac/**"
+      - ".github/workflows/darkroom-booth-mac.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/darkroom-booth-mac/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/darkroom-booth-mac
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test

@@ -1,0 +1,265 @@
+# Darkroom Booth 3.00.943: printers and the print color pipeline
+
+Scope: the printer drivers, color data and print flow in `/mnt/project-files/rea-darkroom-booth/D27LibCom`, and how each one maps to macOS. This is static analysis only. Nothing was executed, and no real printer was tested.
+
+**Evidence tags**
+- **[O]** Observed directly in the install, through PE headers, export and import tables, strings, resources, file bytes or disassembly.
+- **[G]** Observed in the Gutenprint source. The copy used is the GitHub mirror `echiu64/gutenprint`, commit `a59d991` (2023-03-17, Gutenprint 5.3.4 line). The files are `src/cups/backend_*.c` and `src/main/print-dyesub.c`.
+- **[I]** Inferred from the evidence. The inference may be wrong.
+
+Scripts and dumps are in (local analysis scratch, not committed): `pedump.py`, `retscan.py`, `rsrc.py`, `dlg.py`, `dis.py` and `ev_strtab.txt`.
+
+---
+
+## 1. Where printing actually happens
+
+| Module | Role | Evidence |
+|---|---|---|
+| `DarkroomBooth.exe` (3.00.943) | Booth UI only. It imports no WINSPOOL functions, and its strings cover only copies, prompts and "Print Sample". | [O] import table; RT_STRING 532–862 |
+| **`Eventlib.dll`** (EventLib 9.20.943, Darkroom Software) | **The whole print engine.** It holds the printer list, per-model drivers, print queue, print server and client, color profiles and status monitoring. It is shared with Darkroom Pro/Express, so it supports far more printers than a booth needs. | [O] imports `WINSPOOL.DRV` (`OpenPrinterA GetPrinterA SetPrinterA EnumPrintersA DocumentPropertiesA DeviceCapabilitiesA GetPrinterDataA GetPrinterDriverA ClosePrinter`) and GDI (`CreateDCA StartDocA StartPage EndPage EndDoc AbortDoc StretchDIBits SetDIBitsToDevice SetICMMode SetICMProfileA EnumICMProfilesA`). RTTI classes are listed in §5. |
+| `Xphotolib.dll` (9.20.943) | Order and receipt reports. It uses GDI `StartDocA`/`StretchBlt`, `OpenPrinterA`/`GetPrinterA`, and WINSPOOL ordinal `#201`. It is not the photo print path. | [O] imports; strings 25126 "default printer", 25159 "Cut Here" |
+| `drbooth2.dll` | Exports only ordinals (internal name `javaShafer.dll`). It contains no printing strings. | [O] |
+| `BoothMode.exe`, `D27LibCom.dll` | .NET stubs with no printing. | [O] |
+
+Eventlib loads every vendor DLL dynamically with `LoadLibrary` and `GetProcAddress`. The function names exist only as strings, for example `"chcusb_"` concatenated with `"open"`, `"listupPrinter"` and so on. No vendor DLL appears in its import table. [O]
+
+### Not printer-related, despite earlier guesses
+- **`MLib.dll`, `e27m.dll`, `Ucs32P.dll`, `e27ucs.dll`** belong to the Canon RAW and DPP stack. `Ucs32P` and `e27ucs` are Canon ColorGear. `MLib` sits next to `dpprsc.dll`/`dppdll.dll` in Eventlib's strings and exports `MLIBconvertRGBtoLAB`, `MLIBcalcLucky*` and similar. `e27*` is EDSDK 2.7. [O] This belongs to the cameras scope.
+- **`ICC/` folder:** this is Canon Picture Style data, not printer data. [O]
+  - `1001_*.BIN`, `6001_*.BIN` … `6351_*.BIN` start with the magic `ARCHIVE\0`, followed by an embedded Canon `UCCM` profile (`scnr`, `RGB`→`Lab`).
+  - The number is a Canon camera-model ID. The suffix is the picture style: `F/L/N/P/S` = Faithful/Landscape/Neutral/Portrait/Standard, and `faf/lnd/ntl/ptr/std` are newer variants.
+  - `6351_*.BIN` (332–536 B) begin with `SEED.6351_xx.BIN`.
+  - `FA/FS/LA/LS/NA/NS/PA/PS/SA/SS.ICC` are Canon ICC v2 `scnr` profiles, for example "6091 Faithful sRGB" with A2B0/1/2 tables.
+  - `6000.ICC` is a Canon `mntr` profile. `AdobeRGB`/`AppleRGB`/`ColorMatchRGB`/`WideGamutRGB.icc` are Adobe working spaces, and the two `sRGB*.ic?` files are Canon sRGB v1.31.
+- **No printer ICC profile ships in the install.** [O] Eventlib refers to profiles in the Windows color directory as `<COLOR DIR>\…`, so they would have come from the vendor driver installers. See §4.
+
+---
+
+## 2. Vendor libraries in the install
+
+### 2.1 Mitsubishi Electric: `cpusbxpm.dll` with `MUsbIf.dll` and the CP*.csv/.lut/.dat files
+
+| Item | Detail |
+|---|---|
+| `cpusbxpm.dll` | [O] "MITSUBISHI CP Printers Control Tool", product **CP-ConductorUSB**, version 9.2.0.0M, built 2017-11-06, copyright 2006–2017. Internal C++ classes: `CDllFunc38` (CP3800DW), `CDllFunc5000` (CP-W5000), `CDllFunc70` (D70/D707), `CDllFuncK60`, `CDllFunc80` (D80), `CDllFunc90` (D90). |
+| `MUsbIf.dll` | [O] "MITSUBISHI Usb Printer Interface Dll", 2014. Exports `SetVenderProductID(vid,pid)`, `UsbGetDeviceNum`, `UsbGetDeviceInfo`, `UsbOpenBulk/2/3`, `UsbOpenCont2/3` and `UsbDeviceIoControl` (7 args). It is SetupAPI-plus-DeviceIoControl transport, imported by `cpusbxpm`. |
+
+**USB identity table inside `cpusbxpm.dll` (file offset 0x5b1ac)** [O]
+
+The table is a list of `(VID u16, PID u16, internal code u16)` entries. The model column comes from [G] or from `MDL:` strings embedded in `cpusbxpm` [O].
+
+| VID:PID | code | Model |
+|---|---|---|
+| 06D3:0380 / 0381 / 0385 / 0387 / 038C | 1–6 | Older CP-series. Exact models unknown. |
+| 06D3:038B | 5 | CP-3020D/DU/DE [G] |
+| 06D3:0394, 0395 | 14, 15 | CP-9000DW [G] |
+| 06D3:039E, 03A6 | 131, 141 | Unknown |
+| 06D3:03A5 | 151 | CP-9550DW-S [G] |
+| 06D3:03AA | 19 | CP-3020DA [G] |
+| 06D3:03AE | 170 | CP-9800DW-S [G] |
+| 06D3:3B20, 3B2F | 180, 1000 | Unknown. Possibly CP-9820DW-S or other 98xx variants. [I] |
+| 06D3:**3B30** | 2100 | **CP-D70DW / D707DW** (`0;MDL:CP60D70D707D;`) [O][G] |
+| 06D3:**3B31** | 2140 | **CP-K60DW-S** (`1;MDL:CK60D70D707D;`) [O][G] |
+| 06D3:**3B36** | 2300 | **CP-D80DW** (`6;MDL:CPD80D;`) [O][G] |
+| 06D3:**3B50** | 50 | **CP-W5000DW** (`P;MDL:CPW5000D;`) [O] |
+| 06D3:**3B60** | 45 | **CP-D90DW** (`` `;MDL:CPD90; ``) [O][G] |
+| 1343:0004 | 25 | **CP-3800DW**, a rebadged DNP DS80 (`MODEL:CP3800DW;`) [O]. Gutenprint lists `mitsubishi-cp3800dw` on 1343:0004 under `dnpds40` [G]. |
+
+Model names Eventlib shows for XPM [O]: `CP-70D CP-70DWS CP-707D CP-707DWS CP-707DWU CPK-60D CPK-60DW-S CPK-606D CP-D80D CP-D80DW-S CP-D90D CPW5000DW`. Its registry keys are `Printers\MitCP-70D`, `MitCPK60D`, `MitCP-D80D`, `MitCP-D90D` and `MitCPW5000DW`.
+
+**Exports and inferred signatures** [O names; arity from `ret N` for stdcall]
+
+The `CPU9*` family covers the CP-9xxx series and the D70-class models through `CDllFunc*`. `CPUX*` covers the CP-3020 series. `CP50*` is the W5000. `CP90*`/`CPU90*` is the D90. `CPU38*` is the CP3800. `PS*` controls the Print Sorter accessory. [I]
+
+```
+CPU9CheckPrinter(usbNo, pIDInfo)                     CPU9GetCPDIDinfo(?, pIDInfoCP)
+CPU9SetPrintParameter(4) / CPU9SetPrintParameter2(2) CPU9SendImage(4) / SendImage2(5) / SendImagePrint(9)
+CPU955SendImage(6) / CPU955SendImagePrint(10)        CPU9PrintOut(2)  CPU7PrintOutorClear(2)  CP9FixImageorPrintOut(2)
+CPU9CheckPrintEnd(3)  CPU9PrintJobCancel(1)  CPU9PreHeat(1)  CPU9InkSkip(1)  CPU9CheckInkSkip(2)
+CPU9CheckPaperRemain(2)  CP50CheckPaperRemain(2)  CPU9WarningPaperRest(2)  CPU9GetMediaType(2)
+CPU9GetTotalPrintCount(2)/2(2)  CPU9GetPrintJobCount(2)  CPU9Get/SetPrinterNumber(2)  CPU9Get/SetContrastTable(2)
+CPU9GetFWInfo(2) CPU38GetFWInfo(2) CPU90GetFWInfo(2)  CPU9/CP50/CP90GetErrorHistory(2)  CPU9ChangeInitialSetting(4)
+CPUASetPrintParameter(5) CPUASendImage(4) CPUASendImagePrint(7)
+CPUXInit() CPUXInit2(1) CPUXSearchPrinters(4) CPUXConnectionPrinters(4) CPUXCheckPrinter(1) CPUXSetPrintParameter(2)
+CPUXSendImage(4)/2(5) CPUXSendImagePrint3020(5)/Ex(7) CPUXPrintOut(1) CPUXMemoryClear(1) CPUXGetMediaIcInfo(2) ...
+PSSearchSorterPrinters(5) PSSetSorterParameter(2) PSCheckSorter(2) PSOrderEnd(2) PSSorterReset(1)
+```
+
+Eventlib resolves the CPU9, CPUX, CPUA, CP50CheckPaperRemain and CPU7PrintOutorClear names, so all of these families are reachable from Darkroom. [O]
+
+**Color and correction data files** [O]. `cpusbxpm` refers to every one of these by name. Eventlib expects them under `Printers\Mitsubishi\XPM\` and logs "Mitsubishi XPM printer color files are missing…" if they are absent. In this install they sit in the root folder. Whether the loader falls back to the root is unverified.
+
+| File(s) | Size / structure | Model (code xref) | Gutenprint equivalent |
+|---|---|---|---|
+| `CP60D_COL.lut`, `CP60H_COL.lut` (identical), `CP70D_COL.lut`, `CP80D_COL.lut` (identical to CP70D), `CP90D_COL.lut` | **14739 B = 17×17×17×3**, with no header. Raw 8-bit 3D RGB LUT. | CP60 = **K60** (data pointer table next to `CDllFuncK60`), CP70 = **D70/D707**, CP80D = **D80**, CP90D = **D90** | `LUT_LEN 14739`, the file loaded by `Load3DColorTable()` [G]: `CPS60L01.lut` (K60), `CPD70L01.lut`, `CPD80L01.lut`. **Same format.** Byte equality not checked: no Gutenprint data files were available here. |
+| `CP60_01/03.csv`, `CP60H_01/03.csv` (`_02` is referenced but absent) | CSV. Row 1 is the column names, row 2 is `size,…` (each column's valid length), then 2730 rows of `index,values…`. 21 columns: `LINEy LINEm LINEc`(2730) `GNMby GNMgm GNMrc`(256) `FM`(256) `KSP KSM OSP OSM`(128) `KP KM`(11) `HK`(4) `Speed`(3) `FH`(5) `SHK`(72) `UH`(101) `ROLK`(13) `REV`(76). Floating-point values. | K60. **H** = HG media, `_01` = normal speed, `_03` = Ultra-Fine. [I from G] | `CPS60T01/T03.cpc` and `CPS60H01/H03.cpc` [G] (the "CPC" correction tables read by lib70x `get_CPCData`) |
+| `CP70_01/02/03.csv` | Same layout with 19 columns (no `ROLK`/`REV`, `FH` has 4 entries). | D70/D707 | `CPD70N01/S01/U01.cpc` [G]. Mapping 01→N, 02→S, 03→U is [I]. |
+| `CP80D_01..04.csv` | 21 columns | D80 | `CPD80N01/S01/U01/E01.cpc` [G]. The fourth file is likely E (SuperFine with rewind). [I] |
+| `CP90_3_1.csv`, `CP90_3_2.csv` (identical; `CP90_1_*` referenced but absent) | Columns `GNMby,GNMgm,GNMrc` × 256 (gamma only), padded to 2730 rows. | D90 | No D90 CPC in Gutenprint. It handles only CPM1 CSVs for the CP-M1. [G] |
+| `CP90PAN01.dat`, `CP90PAN02.dat` (identical) | **71,208,416 B**, little-endian. `u32 7`, then 3×16 u32 YMC table (7 used: 35583, 30212…), pad, `u32 0x11` at byte 200, 3×17 BGR table, then a large double table. The trailer is `"PA17424a"`. | D90 panorama blending | Gutenprint `backend_mitsud90.c` comment "D90 Panorama data table files (CP90PAN??.dat)" gives the same layout and footer `PA17424a`. Gutenprint puts header2 at @196; it is observed at @200. [G][O] |
+| `D70MAT02.raw`, `D80MAT%02d.raw` | Lamination (matte) pattern files. **Referenced but not shipped.** | D70/D80 | `D70MAT01.raw`, `D80MAT01.raw`, `S60MAT02.raw` [G] |
+
+The CPC CSV column names and sizes match the CPC structure that Gutenprint's lib70x reads, for example `ROLK[13]` and `REV[76]`. They are the Mitsubishi "CP-Conductor" image-reprocessing tables for thermal-head and gamma correction. [I, strong]
+
+### 2.2 Shinko / Sinfonia: `904*.dll` (CHC-S9045 family) and `S1245*.dll` (CHC-S1245)
+
+| DLL | VERSIONINFO [O] | Role |
+|---|---|---|
+| `904usb.dll` | SHINKO ELECTRIC, original name "CHCUSB.DLL" 1.0.2.0 (2004) | Printer API (`chcusb_*`). Model strings: `SHINKO  CHC-S9045`, `CHC-S1145`, `CHC-S7045`. |
+| `904UsbCtrl.dll` | "SDKUsbCtrl" 1.0.0.5 | USB transport (`SDKUsb_*`) |
+| `904ColorMatch.dll` | "SDKColorMatch" 1.0.1.0 (2002) | ICC → LUT engine (`SDKCM*`) |
+| `904TankApi.dll` | "SDKTank.dll" 1.0.0.2 | Thermal-head heat-history ("tank") compensation filter |
+| `TankS9045Pram.bin` | 76 B = 19 little-endian u32: `1, {20000,1000,30,70,80,80}, {20000,1000,30,80,80,80}, {20000,1000,30,50,80,80}` | Three 6-value parameter sets. They match `TankDllSet{Y,M,C}Parameter(handle + 6 values)` (7 args each), so the sets are Y, M and C. The leading 1 is a version or count. [O sizes and arity; I meaning] |
+| `S1245u.dll` | "chcusb.dll for CHC-S1245" 1.0.0.5 (2006). Reads `.\S1245Pram.ini` (not shipped). | Printer API (same `chcusb_*` family, plus `setmtfEx` and `GetDebugData`) |
+| `S1245UCtrl.dll`, `S1245ColMatch.dll` | SDKUsbCtrl / SDKColorMatch for Shinko | Transport and color |
+
+**USB IDs** [O, from `cmp …,0x10CExxxx` immediates]
+- `904usb`: **10CE:0003**, the CHC-S9045 (19 sites). [I]
+- `S1245u`: **10CE:0007** (CHC-S1245, which matches Gutenprint [G]) and also 10CE:0003.
+
+**`chcusb_*` API** (stdcall arity [O]; meanings [I])
+
+```
+open(1) close() listupPrinter(1) listupPrinterSN(1) listupPrinterLbl(1) selectPrinter(2) selectPrinterSN(3) selectPrinterLbl(2)
+imageformat(6)            // format, ncomp, width, height, inLine, rc
+setmtf(1) setmtfEx(2) makeGamma(4) getGamma(5) getMtf(3)
+setIcctable(10)           // e.g. (iccIn, iccOut, intent, lutR, lutG, lutB, ...): builds a LUT through SDKColorMatch
+copies(2) startpage(2) write(3) endpage(1) cancelCopies(2) continue(3)
+status(1) statusAll(2) getPrinterInfo(3) setPrinterInfo(4) get/setPrinterToneCurve(4|5,3|4)
+blinkLED(1) resetPrinter(1) useTankDll(2)   // 904 only
+SendCommand(5) SendRawData(3) MakeThread(1) ReleaseThread(1) AttachThreadCount(2)
+startDlMode(5) endDlMode(1) openDownload(2) newMotFile(6) disposMotFile(1)   // firmware download
+executiveDiagnostic(1) getDiagnostic(3) resetCounter(2) resetErrHistory(1) setSerialNumber(2) setHeadType(2) getSumCheckData(3)
+```
+
+`SDKUsb_*` (identical across 904/S1245/Brava): `Open(1) OpenEx(3) Close(1) GetPipeHandle(4) AbortPipe/ResetPipe/ClosePipe(1) VendorRequest(8) ClassRequest(8) GetDeviceIDString(3) GetDevice/Config/String/Qualifier descriptors, CheckDevice(Name), ResetDevice(1)`. The IEEE-1284 ID string is `MFG:SHINKO ;CMD:ESC;MDL:USB PRINTER;CLS:PRINTER;DES:SHINKO USB PRINTER;`. [O]
+
+`SDKCM*` (cdecl, with stdcall `_` twins): `OpenProfile CloseProfile CreateColorWorld DisposeColorWorld CreatLUT MatchPixelMap MatchPlaneMap ConvertColorWorldToIPB GetProfileHeader GetTagTableInfo GetPartialProfileElement GetNumsOfIn/OutPixComp`. This is a small ICC CMM. [O]
+
+**Eventlib integration** [O]
+- Classes: `CShinko`, `CShinkoThread`, `CShinkoThread1245`, `CShinkoThread2145`, `COlmecThread1000`, and `CShinko{1245,2145,9045}SetupPage`.
+- Monitor windows: `S9045_MonitorFrame32`, `S1245_MonitorFrame32`, `S2145_MonitorFrame32`, `OP1000_MonitorFrame32`.
+- DLL candidates: `904usb.dll`, `s1245u.dll`, `S2145usb.dll`, `OP1000usb.dll`. **The S2145 and OP1000 DLLs are absent from this install.**
+- Default ICC per model: `<COLOR DIR>\SHINKO_CHC-S9045-5A_1.ICC`, `CHC-S1245.ICC`, `S2145_2.ICC`, `OP1000_2.ICC`.
+- The setup dialog (ID 205) has "Printer Gamma" R/G/B, "Edge Enhancement", Sharpen/Smooth and a custom ICC file.
+- S9045 error strings include "Media security card does not match / has no remaining prints".
+
+### 2.3 CIAAT Brava 21: `Printers/Ciaat/BRAVA21*.dll`
+[O] CIAAT Co., Ltd., built 2013-02. `BRAVA21usb.dll` 2.0.0.2 is a `chcusb_*` API. `BRAVA21UsbCtrl.dll` provides `SDKUsb_*`, `BRAVA21ColorMatch.dll` provides `SDKCM*`, and `BRAVA21ImageProcess.dll` exports `ImageProcessing(3)` and `ImageAvrCalc(4)`. The PDB path is `Image_Processing_x86_Source_Z0143900-1100`.
+- **USB 10CE:001E.** [O] Gutenprint lists 10CE:001E as `ciaat-brava-21` with type `P_SHINKO_S6145D`, meaning a **Sinfonia CHC-S6145 (CS2) derivative**. [G]
+- Brava-specific `chcusb_` additions: `setCutList(2)`, `setLaminatePattern(3)`, `color_adjustment(8)`/`Ex(8)`, `getParameter`/`setParameter(3)`, `getEEPROM(3)`, `getPrintIDStatus(3)` and `universal_command(5)`.
+- **`ImageProcessing`/`ImageAvrCalc` match Gutenprint exactly**: `ImageProcessingFN(uchar*, ushort*, void*)` and `ImageAvrCalcFN(uchar*, ushort, ushort, uchar*)`, loaded from `libS6145ImageProcess` or the open reimplementation `libS6145ImageReProcess`. [G] The Brava DLL is therefore Sinfonia's S6145 thermal-compensation library.
+- Eventlib uses `CBravaPrinterInfo`/`CBravaRasterPrint`/`CBravaSetupPage`, the registry key `Printers\Brava21`, and dialog 3289 ("Blink Printer LED", "Printer sleeps after", Multi-cut, Laminate, 2x6 cut and Fine Adjust). [O]
+
+### 2.4 DNP / Citizen: `cspstat.dll` ("CSP Status API" 0.6.8.3) and `PanoramaProc.dll`
+[O] No company is named in the VERSIONINFO, but the protocol strings are DNP's: `ESC P` commands such as `%cPINFO  PQTY`, `PINFO  MEDIA`, `PSTATUS`, `PCNTRL CUTTER`, `PIMAGE MULTICUT`, `PCNTRL OVERCOAT`, `PMNT_RDCOUNTER_L/A/B/M/P/MATTE/DUPLEX`, `PCNTRL FULL_CUTTER_SET` and `PINFO PANORAMA_PRINT`. It also handles DNP SnapLab tower and minilab commands (`TCMD_RDTOW_*`, `PCXM*`) and uses the mailslot `\\.\mailslot\Csp`.
+- **USB IDs** [O]: `vid_1343&pid_0001…0009`, `vid_1343&pid_ffff` and `vid_1452&pid_8b01`, `9001`. Gutenprint maps these as follows [G]:
+  - 1343:0003 DS40 / Citizen CX
+  - 1343:0004 DS80 / CX-W / CP3800DW
+  - 1343:0005 DS-RX1 / Citizen CY
+  - 1343:0002 Citizen CW-01
+  - 1343:0006 CW-02 / OP900II
+  - 1343:0008 DS80DX
+  - 1452:8B01 DS620
+  - 1452:9001 DS820
+- Model strings [O]: `DS40 DS40M DS80 DS80M DS80DUP DS-RX1 DS620 DS820 CX CX-W CXM CX_WM CY CW-02 DP-TC DST`.
+- **Exported API (stdcall).** This is the DNP "CspStat" SDK; names [O], arity [O], meanings [I]:
+  - Discovery and status:
+    ```
+    GetPrinterPortNum(2) GetStatus(1) GetPQTY(1) GetMedia(2) GetMediaClass(1) GetMediaCounter(1)/H GetMediaLotNo(2)
+    GetMediaColorOffset(1) GetFreeBuffer(1) GetSerialNo(2) GetFirmwVersion(2) GetResolutionH/V(1) GetSensorInfo(2)
+    GetCounterL/A/B/M/P/Matte/Duplex(1) SetClearCounterA/B/M(1) SetCounterP(2) GetRfidMediaClass(2) GetPanoramaPrintable(1)
+    ```
+  - Print job:
+    ```
+    SetMediaSize(2) SetResolution(2) SetPQTY(2) SetCutterMode(2) SetOvercoatFinish(2) SetRetentionMode(2)
+    SetPrinterFilter(1) SetFullCutterSetUp(5) SetCutControl(4) SetContPanorama(3) StartPageLayout(1)
+    SendImageData(6)  // (port, pBGR, x, y, w, h)
+    PrintImageData(1) EndPageLayout(1) CancelPrint(1) StopPrint(1) CutPaper(2) InitializePrinter(1)
+    ```
+  - Maintenance and firmware: `Set/GetStandbyTime`, `SetFirmwDataWrite`, `SetColorDataWrite`, `SetGammaTable(3)`, and the `Cv*` variants for the CX/CY series.
+- Eventlib resolves `GetStatus GetPQTY GetMedia GetMediaCounter GetCounterL/A/P/Matte GetSerialNo GetFirmwVersion GetPrinterPortNum SetMediaSize SetResolution SetCutterMode SetOvercoatFinish SetPQTY SetPrinterFilter StartPageLayout SendImageData PrintImageData EndPageLayout`. **This is direct raster printing that bypasses the Windows spooler.** [O names; I flow]
+- Eventlib paths [O]: it loads `Printers\DNP\cspstat.dll` and `Printers\DNP\panoramaproc.dll`, plus a bare `cspstat.dll`. Registry keys: `Printers\DNP DS40/DS80/DSRX1/DS620/DS820/SL10`. Overcoat names: `Matte1 Matte2 Matte3 LightMatte FineMatte`. Other settings: `CutterMode`, `MultiCut_5x7`, `Allow6x7`, `FullSheet`, `RfidMediaClass`. Default ICC: `ds40_0101.icm`, `ds80_0101.icm`, `rx1.icc`, `ds620-r0.icc`, `PP_DS820_0010.icc`/`SD_DS820_0010.icc`. Panorama parameter files from `Darkroom Software\DNP\ParameterFiles\` are `LUTData_0010.csv`, `LUTData820_0010.csv`, `ICCTblData_00{10,20_PP,21_SD}.csv` and `CorrectTableData.csv`. **None of these are shipped here.**
+- `PanoramaProc.dll` [O] is from **CITIZEN SYSTEMS** ("Image processor library for Continues Panorama function" 1.1.0.0). It exports `PP_SetCorrectionParam(5) PP_Divide(5) PP_ProcessLhs/Rhs/Both(6) PP_DutyYMC(2) PP_GetDutyFromLUT(2) PP_Reset()` and imports mscms (`CreateColorTransformW`, `TranslateBitmapBits`). It splits a panorama into overlapping panels and blends their density. [I]
+- DNP setup dialog 3285 [O]: Bleed, Resolution, Laminate, Multi-cut, "Cut into smaller sheets as allowed by printer", **"Always cut 4x6's into 2x6's"**, "Rotate Output 180-degrees", Fine Adjust (h/v), "Show all DNP printers", print-count list with "Reset Selected Count", and Status.
+
+---
+
+## 3. Printers Eventlib supports (and whether this install can drive them)
+
+[O] from RTTI, the RT_STRING table (`ev_strtab.txt`), registry key strings and DLL-name strings.
+
+| Family | Models (as named in Eventlib) | Transport | Driver files in install? |
+|---|---|---|---|
+| **DNP / Citizen** | DS40, DS80, DS-RX1, DS620, DS820, SL10 (+ CX/CY/CW via cspstat) | Direct USB via `cspstat.dll` | **Yes** |
+| **Mitsubishi XPM** | CP-D70/D707, CP-K60, CP-D80, CP-D90, CP-W5000 | Direct USB via `cpusbxpm.dll` + `MUsbIf.dll` | **Yes** (LUT, CSV and DAT present; MAT `.raw` files absent) |
+| Mitsubishi legacy USB-direct | CP3020, CP9000(AM), CP9500, CP9550, 8000 (USB) | `cpusbxp.dll` and `musbprif.dll` | **No** (the error text says "cpusbxp.dll cannot be loaded") |
+| Mitsubishi Windows | CP3800DW (`CMitsubishi3800Printer`, AutoCut needs driver ≥1.1.0.0), CP9800DW, 700/770/7000/7500/800/8000, 3020/9000/9500/9550 (Win) | Windows driver + DEVMODE | Driver not bundled |
+| **Shinko/Sinfonia** | CHC-S9045 (+S1145/S7045 strings), CHC-S1245, CHC-S2145, CHC-S545-5; Olmec OP-1000 (S2145 OEM) | `chcusb` direct | 9045 and 1245 **yes**; 2145 and OP1000 **no** |
+| **CIAAT Brava 21** | Brava 21 | `chcusb` direct (S6145D) | **Yes** |
+| Sony | UP-DR150, UP-DR200, UP-CX1, UP-D75, UPD50/70 (gray calibration), UP-DR100, UP-GR700 (`upGR700.dll`) | Windows driver plus USB-ID detection: `vid_054c&pid_01e8` DR150, `035f` DR200, `02d4` CX1, `0202` (D75? [I]); also `vid_13fb&pid_0004` | DLLs absent |
+| Kodak | 6800 (`k68usb.dll` / `K68UsbCtrl` / `K68ColorMatch`, also Shinko-based), 9810 (`kpp8800.dll`), ML-500, DLS/DP2 (hot folder) | Mixed | **No** |
+| Fujifilm | ASK-2000/4000 (`CFujiAskPrinter`, ICC `ASK-2000V060411C.icm`), DX100 (Windows + PUD `C:\PUD\PModuleIF\PModuleIF.dll`), Frontier (Pic hot folder), NC-300/1000, Pictrography | Mixed | Absent |
+| Others | Olmec OP-506/600/800/900 (`dpb8.dll`/`odpb.dll`), Copal DPB-1000/1500 (`cdpb.dll`), Evolis Pebble 4, Zebra F680 (`zbrf680.dll`), Epson Stylus Pro 3800–9880 (embedded XML paper and devmode tables), Canon imagePROGRAF iPF (embedded DEVMODE map), Noritsu QSS/NetOrder/IP-64, Agfa, Durst, Gretag, Konica QD-21, HP Hot Folder, Generic Roll, Raster Image (file output), Simulated/Fake printer | — | — |
+| **Any Windows printer** | `CWindowsPrinterInfo` / `CWindowsRasterPrint` ("Windows Printer %u") | GDI + DEVMODE | — |
+
+For a booth rebuild, the dye-sub families that matter are **DNP/Citizen, Mitsubishi (D70/K60/D80/D90/W5000/9xxx/3800), Sinfonia/Shinko (S1245/S2145/S6145-Brava/S9045), Sony UP-DR150/DR200/CX1, HiTi** (generic Windows only here), **Kodak 6800/605/305**, Fuji ASK, and Windows printers in general. [I]
+
+---
+
+## 4. Print pipeline (as implemented)
+
+1. **Queueing** [O, class names and strings]: `CPrintQueue` → `CPrimaryPrintQueue`/`CSecondaryPrintQueue`, `CClientPrintQueue`, `CPrintServer`/`CPrintClient`/`CPrintQueueComm` (a networked print station), `CDlgPrintQueue` and per-printer `CPrintThread`. Statuses are "Spooling", "Image sent. Waiting for printer", "Queued on printer", "Printer Suspended" and "Print queue paused". Failover offers "Retry on same printer" or "Print to another printer". Jobs are routed by **roll and media rules** (`SRollInfo::WillAcceptSize`, "Media Rule", "Prints must match ALL media types", "Split printer orders by roll-width"). Sheets are combined to minimize count ("Combine prints if they fit together on a larger sheet size", "AutoCut two 4x6 on 6x8").
+2. **Rasterization**: the layout is rendered to a bitmap (`CRasterPrint`/`CRasterImagePrint`, `EPaperSize` enum, `FindPaperSizeBySize/ByName`, `ResolvePaperSize[mm]`). Per-printer bleed and fine x/y offset (`xOffset_4x6`, `yOffset_6x8`, "Fine Adjust"), sharpening, mirror (`PrintMirror`) and 180° rotation are applied. [O]
+3. **Color**:
+   - A per-printer ICC profile can be chosen. The UI says the "output color profile is applied as a last step before sending the image to the printer". For Windows drivers, "Enabling a color profile will set the ICM Method to Disabled in the Printing Preferences", which means a DEVMODE `dmICMMethod` override. [O strings]
+   - The transform uses mscms or GDI ICM: `SetICMMode`, `SetICMProfileA`, `EnumICMProfilesA` and the string `mscms.dll`. [O imports; I usage]
+   - Direct drivers add their vendor processing:
+     - Shinko: `chcusb_setIcctable` → SDKColorMatch LUT, `makeGamma`/`setmtf`, and the S9045 tank filter.
+     - Brava: `ImageProcessing`.
+     - Mitsubishi: `*_COL.lut` 3D LUT, CPC CSV, lamination data and the D90 panorama DAT.
+     - DNP: `SetPrinterFilter` and the panorama correction.
+4. **Output**:
+   - Windows printers: `CreateDCA` + `DocumentPropertiesA` (stored DEVMODE blobs under `DevMode`/`DevMode Size`), then `StartDocA`/`StartPage`/`StretchDIBits`/`EndPage`/`EndDoc`. [O]
+   - Direct printers: vendor APIs such as `SendImageData` → `PrintImageData`, `chcusb_startpage` → `write` → `endpage`, and `CPU9SendImagePrint`.
+5. **2x6 strips**:
+   - "Always cut 4x6's into 2x6's" and "AllowSmallerSize2x6" [O].
+   - Paper sets `2x6 Set`, `2-2x6` and `4-2x6` [O].
+   - DNP: `SetCutterMode`/`PIMAGE MULTICUT` [O]. In Gutenprint the 2-inch cut is the page size `w288h432-div2` ("2x6*2") together with DNP multicut codes [G].
+   - Brava: `chcusb_setCutList`. Sony: `CutModeDelay`. Mitsubishi: "Multi-cut" and "AutoCut (If Available)".
+6. **Status and consumables monitoring** [O]:
+   - DNP: `GetPQTY` (prints remaining), `GetMedia`, `GetMediaCounter`, life/A/B/P/matte counters.
+   - Mitsubishi: `CPU9CheckPaperRemain`/`CP50CheckPaperRemain`/`WarningPaperRest`, `GetMediaType`, `GetTotalPrintCount`. Mechanism strings include "Waiting for preheat…" and "decoding ink size…".
+   - Shinko: `chcusb_status`/`statusAll` in a monitor thread.
+   - Windows: `GetPrinterA` (PRINTER_INFO_2 status: offline, paper jam, door open).
+   - Error texts cover ribbon end, ribbon/paper mismatch, scrapbox, cover open and so on.
+
+---
+
+## 5. macOS mapping
+
+General approach: use **CUPS** as the spooler and **Gutenprint 5.3.x**, which ships for macOS and includes the `gutenprint53+usb` "dyesub" backend (selphy_print), for the dye-sub family. Use vendor macOS drivers where they exist. Read status through **IPP `marker-levels`/`marker-names`/`printer-state-reasons`** via `ippfind`/`ipptool` or `cupsGetDests` + `cupsGetNamedDest` attributes. In Gutenprint, the backends that implement `query_markers` and emit `ATTR: marker-*` are canonselphy(neo), dnpds40, hiti, kodak1400/605/6800/8800, magicard, mitsu70x, mitsu9550, mitsud90, mitsup95d, shinkos1245/2145/6145/6245 and sonyupd(neo). [G]
+
+| Windows component | macOS replacement | Notes |
+|---|---|---|
+| `cspstat.dll` (DNP/Citizen) | Gutenprint `dnpds40` backend (DS40, DS80, DS80DX, DS-RX1, DS620, DS820, QW410, Citizen CX/CX-W/CY/CX-02/CW-01/CW-02, Mitsubishi CP3800DW) **or the DNP macOS CUPS drivers** | USB IDs match cspstat's list exactly [O][G]. Set 2x6 with `PageSize=w288h432-div2`. Overcoat glossy/matte maps to backend options. `marker-levels` gives prints remaining, which replaces `GetPQTY`. DNP panorama and SnapLab SL10 have no Gutenprint support [G]. **Gap.** |
+| `PanoramaProc.dll` | Reimplement, or rely on the DNP macOS driver's panorama feature if it has one. | Unverified. |
+| `cpusbxpm.dll` + `MUsbIf.dll` | Gutenprint `mitsu70x` (D70/D707/K60/D80, plus Kodak 305 and Fuji ASK-300), `mitsud90` (D90, CP-M1), `mitsu9550` (CP-9000/9500/9550/9600/9800/9810/CP30), `kodak1400` (CP-3020). **Mitsubishi's own macOS drivers** also cover current models. | **CP-W5000 has no Gutenprint backend** [G], so use the Mitsubishi macOS driver (availability unverified). |
+| `CP*_COL.lut`, `CP*.csv`, `CP90PAN*.dat` | Gutenprint needs these as `CPD70L01.lut` / `CPD70N01.cpc` etc. in its corrtable path, plus **`libMitsuD70ImageReProcess`** (open lib70x) for D70/K60/D80. D90 panorama uses `CP90PAN??.dat`. | The formats line up (§2.1). The renaming map is [I] and must be checked by byte-comparing with the Mitsubishi Windows/Mac driver data that Gutenprint documents as its source. The `.raw` lamination files are missing here. |
+| `S1245u.dll` | Gutenprint `shinkos1245` (10CE:0007) | |
+| S2145 / Olmec OP-1000 (DLLs absent) | Gutenprint `shinkos2145` (10CE:000E, 10CE:0011) | |
+| `BRAVA21*.dll` | Gutenprint `shinkos6145` (`ciaat-brava-21`, 10CE:001E) + `libS6145ImageReProcess` | Exact API match for `ImageProcessing`/`ImageAvrCalc` [G]. |
+| `904*.dll` (CHC-S9045) | Gutenprint print-dyesub lists "Shinko CHC-S9045 (experimental)" (raw `ESC CHC` stream). It has **no dedicated status backend.** | **Gap.** This would need a custom IOKit/libusb driver modelled on the chcusb protocol plus the tank filter. Low priority (2004-era printer). |
+| Sony UP-DR150/DR200/CX1 | Gutenprint `sonyupd` (054C:01E8/035F/02D4) | |
+| Kodak 6800/6850, 605/7000/701x, 8800/9810, 1400/805 | Gutenprint `kodak6800`, `kodak605`, `kodak8800`, `kodak1400` | |
+| HiTi (not in Darkroom direct list) | Gutenprint `hiti` backend | |
+| Windows-printer path (GDI + DEVMODE) | `NSPrintOperation` / `PMPrintSession` or the CUPS API (`cupsCreateJob` + raster or JPEG/PDF) with PPD/IPP options (`PageSize`, `MediaType`, `cupsICCProfile`) | Replace DEVMODE blobs with per-queue `lpoptions` and IPP job attributes. |
+| ICC handling (mscms/GDI ICM) | ColorSync (`CGColorSpace` + `CGColorConversionInfo`, or `vImage`) with the profile applied before submission and printer color management off (Gutenprint `Color Correction = Raw/Uncorrected` where appropriate) | Vendor profiles (`ds40_0101.icm` etc.) are not in the install. Get them from the vendor macOS drivers. |
+| Status polling (`GetPQTY`, `CPU9CheckPaperRemain`, `chcusb_status`, `GetPrinterA`) | IPP Get-Printer-Attributes `marker-levels`, `marker-high-levels`, `printer-state-reasons` (media-empty, marker-supply-empty, door-open …); the backend `-s`/query mode for detailed counters | Lifetime and A/B counter resets have no CUPS standard; use the backend's `-n`/`-C` style commands or the vendor tools. |
+| Print queue / server (`CPrintServer`) | A native app-level queue over CUPS jobs (`cupsGetJobs`, IPP job state) | |
+
+### Gaps and verification still needed
+- No real-printer behaviour was observed. The arities come from `ret N` and are approximate for cdecl functions. Argument meanings are inferred.
+- The CP*.csv/.lut to Gutenprint `CPD*/CPS*` name mapping and byte identity are unverified, because no Gutenprint data files were available.
+- Eventlib's folder layout (`Printers\DNP\`, `Printers\Mitsubishi\XPM\`) differs from this install's flat layout. The runtime fallback behaviour is unverified.
+- Absent but referenced files: `CP60_02.csv`, `CP60H_02.csv`, `CP90_1_1/1_2.csv`, `D70MAT02.raw`, `D80MAT*.raw`, `S1245Pram.ini`, the DNP `ParameterFiles` and all vendor ICC profiles.
