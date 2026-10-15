@@ -83,7 +83,7 @@ public final class CanonEDSDKCamera: CameraDevice, @unchecked Sendable {
             }
             camera = found
         }
-        let task = Task.detached { [weak self] in await self?.runLiveView() }
+        let task = Task<Void, Never>.detached { [weak self] in await self?.runLiveView() }
         lock.withLock { liveViewTask = task }
     }
 

@@ -78,7 +78,7 @@ public final class GPhoto2Camera: CameraDevice, @unchecked Sendable {
             self.context = context
             self.camera = camera
         }
-        let task = Task.detached { [weak self] in await self?.runLiveView() }
+        let task = Task<Void, Never>.detached { [weak self] in await self?.runLiveView() }
         lock.withLock { liveViewTask = task }
     }
 
