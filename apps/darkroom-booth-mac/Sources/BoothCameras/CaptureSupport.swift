@@ -35,3 +35,11 @@ enum JPEGEncoding {
 enum CameraErrorBridge: Error {
     case encodeFailed
 }
+
+enum ImageDecoding {
+    /// Decodes a live view frame (JPEG from both libgphoto2 and EDSDK).
+    static func image(from data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+}

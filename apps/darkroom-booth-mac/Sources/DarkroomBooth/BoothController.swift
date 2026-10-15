@@ -24,6 +24,8 @@ final class BoothController: ObservableObject {
     @Published private(set) var retakesRemaining = 0
     @Published private(set) var message: String?
     @Published private(set) var cameras: [CameraDescriptor] = []
+    /// Why tethering backends are unavailable, shown under the camera picker.
+    @Published private(set) var tetheringNotes: [String] = []
     @Published private(set) var printers: [PrinterDescriptor] = []
     @Published private(set) var printerStatus: PrinterStatus?
     @Published private(set) var isBoothRunning = false
@@ -50,7 +52,20 @@ final class BoothController: ObservableObject {
 
     func refreshDevices() async {
         let hotFolders = configuration.hotFolderPaths.map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let providers: [any CameraProvider] = [AVFoundationCameraProvider(), HotFolderCameraProvider(folders: hotFolders)]
+        let providers: [any CameraProvider] = [
+            AVFoundationCameraProvider(),
+            CanonEDSDKCameraProvider(),
+            GPhoto2CameraProvider(),
+            HotFolderCameraProvider(folders: hotFolders),
+        ]
+        var notes: [String] = []
+        if GPhoto2CameraProvider.unavailableReason != nil {
+            notes.append("USB tethering for Canon, Nikon, Sony and Fujifilm needs libgphoto2: brew install libgphoto2")
+        }
+        if CanonEDSDKCameraProvider.unavailableReason != nil {
+            notes.append("Canon EDSDK not installed (optional): add EDSDK.framework to ~/Library/Frameworks")
+        }
+        tetheringNotes = notes
         var found: [CameraDescriptor] = []
         for provider in providers { found += await provider.availableCameras() }
         cameras = found
@@ -81,8 +96,12 @@ final class BoothController: ObservableObject {
             return try AVFoundationCameraProvider().makeDevice(for: descriptor)
         case .hotFolder:
             return try HotFolderCameraProvider(folders: []).makeDevice(for: descriptor)
-        case .gphoto2, .canonEDSDK, .nikonSDK:
-            throw CameraError.backendUnavailable("\(descriptor.backend.rawValue) is not implemented yet")
+        case .gphoto2:
+            return try GPhoto2CameraProvider().makeDevice(for: descriptor)
+        case .canonEDSDK:
+            return try CanonEDSDKCameraProvider().makeDevice(for: descriptor)
+        case .nikonSDK:
+            throw CameraError.backendUnavailable("Nikon SDK is not supported yet; Nikon cameras work through libgphoto2")
         }
     }
 

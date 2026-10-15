@@ -6,11 +6,11 @@ import Foundation
 /// Ciaat, Sony) are reached through Gutenprint's dye-sub backends or the
 /// vendor's macOS driver (docs/reverse-engineering/printers.md).
 public struct CUPSPrinterService: PhotoPrinterService {
-    public var serverURL: URL
+    public var connection: CUPSConnection
     public var session: URLSession
 
-    public init(serverURL: URL = URL(string: "http://localhost:631")!, session: URLSession = .shared) {
-        self.serverURL = serverURL
+    public init(connection: CUPSConnection = .fromEnvironment(), session: URLSession = .shared) {
+        self.connection = connection
         self.session = session
     }
 
@@ -84,14 +84,24 @@ public struct CUPSPrinterService: PhotoPrinterService {
     }
 
     private func send(_ request: IPP.Request, path: String) async throws -> IPP.Response {
-        var urlRequest = URLRequest(url: serverURL.appendingPathComponent(path))
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/ipp", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = request.encoded()
-        let (data, response) = try await session.data(for: urlRequest)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw PrintError.submitFailed("CUPS answered HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        let status: Int
+        let data: Data
+        switch connection {
+        case .domainSocket(let socketPath):
+            let response = try await DomainSocketHTTP.post(socketPath: socketPath, path: path, contentType: "application/ipp",
+                                                           body: request.encoded())
+            status = response.status
+            data = response.body
+        case .http(let serverURL):
+            var urlRequest = URLRequest(url: serverURL.appendingPathComponent(path))
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("application/ipp", forHTTPHeaderField: "Content-Type")
+            urlRequest.httpBody = request.encoded()
+            let (body, response) = try await session.data(for: urlRequest)
+            status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            data = body
         }
+        guard status == 200 else { throw PrintError.submitFailed("CUPS answered HTTP \(status)") }
         return try IPP.decode(data)
     }
 

@@ -22,7 +22,7 @@ let package = Package(
             ]
         ),
         // Camera backends: AVFoundation (webcam/UVC/HDMI capture), hot folder,
-        // libgphoto2 (Canon/Nikon/Sony tethering, loaded at runtime).
+        // libgphoto2 and Canon EDSDK tethering (both loaded at runtime).
         .target(name: "BoothCameras", dependencies: ["BoothCore", "BoothHardware"]),
         // Printing through CUPS (dye-sub drivers: Gutenprint or vendor drivers).
         .target(name: "BoothPrinting", dependencies: ["BoothCore", "BoothHardware"]),
@@ -42,6 +42,7 @@ let package = Package(
         ),
         .testTarget(name: "BoothCoreTests", dependencies: ["BoothCore"]),
         .testTarget(name: "BoothHardwareTests", dependencies: ["BoothHardware"]),
+        .testTarget(name: "BoothCamerasTests", dependencies: ["BoothCameras", "BoothHardware"]),
         .testTarget(name: "BoothPrintingTests", dependencies: ["BoothPrinting", "BoothHardware"]),
         .testTarget(name: "BoothImagingTests", dependencies: ["BoothImaging", "BoothCore"]),
     ]

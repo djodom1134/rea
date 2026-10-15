@@ -53,17 +53,20 @@ Status key:
 
 ### Cameras
 
-| Windows path                                              | Models                                                       | macOS route                                                                                                                  | Status |
-| --------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ------ |
-| DirectShow webcam / DV                                    | USB webcams, capture cards                                   | AVFoundation (also UVC, HDMI capture cards, Continuity Camera)                                                               | ✅     |
-| Hot folder camera (Windows default)                       | Anything that writes files: Wi-Fi/FTP transfer, tether tools | Folder polling with stable-size check                                                                                        | ✅     |
-| Canon EDSDK 13.11 (+ legacy 2.7)                          | EOS up to R/RP/90D/M50/M6 II/M200                            | Canon EDSDK for macOS (bring your own copy from the Canon developer program, loaded at runtime), with libgphoto2 as fallback | 🔜     |
-| Nikon SDK (MAID3) `Type0001..0023.md3`, `D*_Mod.md3`      | D3 through Z 7                                               | Nikon SDK for macOS (bring your own), with libgphoto2 as fallback. The Windows install lacks `Type0024` (Z 6)                | 🔜     |
-| Canon CD-SDK / PS-ReC / RC-SDK (2004–2005)                | PowerShot, EOS 1D II/5D/20D/350D                             | libgphoto2 covers most of these over PTP                                                                                     | ⚠️     |
-| GoPro HTTP (Hero4 era)                                    | GoPro                                                        | Open GoPro HTTP API (Hero 9+) or HDMI capture through AVFoundation                                                           | 🔜     |
-| Nikon D1 FireWire (`NkD1394p`)                            | D1 series                                                    | ❌ No FireWire on current Macs                                                                                               | ❌     |
-| Fujifilm S1–S5, Olympus E-1, Kodak, Phase One, Megavision | (dead code in Windows)                                       | libgphoto2 if ever needed                                                                                                    | ❌     |
-| TWAIN, Snap Camera                                        |                                                              | ❌ TWAIN is vestigial; Snap Camera was discontinued in 2023                                                                  | ❌     |
+| Windows path                                              | Models                                                       | macOS route                                                                                                                                  | Status |
+| --------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| DirectShow webcam / DV                                    | USB webcams, capture cards                                   | AVFoundation (also UVC, HDMI capture cards, Continuity Camera)                                                                               | ✅     |
+| Hot folder camera (Windows default)                       | Anything that writes files: Wi-Fi/FTP transfer, tether tools | Folder polling with stable-size check                                                                                                        | ✅     |
+| Canon EDSDK 13.11 (+ legacy 2.7)                          | EOS up to R/RP/90D/M50/M6 II/M200                            | Canon EDSDK for macOS (bring your own copy from the Canon developer program, loaded at runtime), with libgphoto2 as fallback                 | ✅ ¹   |
+| Nikon SDK (MAID3) `Type0001..0023.md3`, `D*_Mod.md3`      | D3 through Z 7                                               | libgphoto2 (loaded at runtime). A Nikon SDK backend is not planned unless libgphoto2 falls short. The Windows install lacks `Type0024` (Z 6) | ✅ ¹   |
+| Canon CD-SDK / PS-ReC / RC-SDK (2004–2005)                | PowerShot, EOS 1D II/5D/20D/350D                             | libgphoto2 covers most of these over PTP                                                                                                     | ⚠️     |
+| GoPro HTTP (Hero4 era)                                    | GoPro                                                        | Open GoPro HTTP API (Hero 9+) or HDMI capture through AVFoundation                                                                           | 🔜     |
+| Nikon D1 FireWire (`NkD1394p`)                            | D1 series                                                    | ❌ No FireWire on current Macs                                                                                                               | ❌     |
+| Fujifilm S1–S5, Olympus E-1, Kodak, Phase One, Megavision | (dead code in Windows)                                       | libgphoto2 if ever needed                                                                                                                    | ❌     |
+| TWAIN, Snap Camera                                        |                                                              | ❌ TWAIN is vestigial; Snap Camera was discontinued in 2023                                                                                  | ❌     |
+
+¹ Capture, download and live view are implemented, but no camera has been
+tried yet. libgphoto2 also covers Sony and Fujifilm bodies.
 
 The 252-entry camera VID/PID table from `Eventlib.dll` ships as
 `camera-usb-models.tsv`, so detection can pick a backend per model, the same
@@ -75,7 +78,8 @@ The Windows app talks to dye-sub printers over raw USB through vendor DLLs.
 On macOS they go through CUPS. Use Gutenprint's dye-sub backends where they
 exist, or the vendor's macOS driver. The app reads state, reasons and
 `marker-levels` (ribbon or media remaining) over IPP from the local CUPS
-server.
+server, over its local domain socket (`/private/var/run/cupsd`, or
+`CUPS_SERVER`). macOS only opens TCP port 631 when printer sharing is on.
 
 | Windows library                 | Printers                                                | macOS route                                                                                                                     | Status      |
 | ------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------- |
@@ -115,7 +119,7 @@ Done in this PR:
 
 Roadmap, in order:
 
-1. Canon EDSDK and libgphoto2 backends with live view.
+1. Try the Canon EDSDK and libgphoto2 backends on real cameras.
 2. Phidgets inputs and outputs, with the `inputs.json` import.
 3. Delivery: SMTP email, MMS gateways (`Carriers.txt`), Twilio, a QR download link.
 4. A template editor and screen templates with per-stage visibility. Decoding `.xbdr` needs sample template files.

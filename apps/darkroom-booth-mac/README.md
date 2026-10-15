@@ -9,6 +9,8 @@ for what the Windows app does, recovered from its binaries.
 
 - macOS 14 or later
 - Swift 6 toolchain: Xcode 16+ or the Command Line Tools (tests use swift-testing)
+- For USB tethering of Canon, Nikon, Sony and Fujifilm cameras: `brew install libgphoto2`
+- Optional, for Canon cameras: Canon's EDSDK for macOS from the Canon developer program, with `EDSDK.framework` in `~/Library/Frameworks`, `/Library/Frameworks` or the app's `Contents/Frameworks` (or set `DARKROOM_EDSDK_PATH`)
 - For dye-sub printers: [Gutenprint](https://gutenprint.sourceforge.io/) 5.3.4 or later, or the printer vendor's macOS driver, with the printer added in System Settings → Printers & Scanners
 
 ## Build and run
@@ -27,7 +29,8 @@ the permission prompt can appear. To get a double-clickable app bundle, run
 
 1. Pick a camera.
    - Webcams, capture cards and iPhone Continuity Camera are listed automatically.
-   - For DSLRs, tether with any tool that saves into a folder, then use **Add hot folder…**. Canon and Nikon direct control is next on the roadmap.
+   - Tethered cameras over USB are listed as "(Canon EDSDK)" or "(libgphoto2)" with live view. Set the camera to save JPEG. If libgphoto2 says it cannot claim the camera, quit Image Capture and Photos or run `killall ptpcamerad`, then reconnect it.
+   - Any other camera or tether tool that saves into a folder works through **Add hot folder…**.
 2. Pick a printer from the CUPS queues. Status and ribbon or media levels show when the driver reports them.
 3. Pick a print layout, then set the countdown, review, retake and copies options.
 4. Click **Start Booth Mode**.

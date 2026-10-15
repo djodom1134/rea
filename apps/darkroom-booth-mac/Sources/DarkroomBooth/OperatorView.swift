@@ -31,6 +31,9 @@ struct OperatorView: View {
                         Text(camera.name).tag(String?.some(camera.id))
                     }
                 }
+                ForEach(controller.tetheringNotes, id: \.self) { note in
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Add hot folder…") { addHotFolder() }
                     Button("Refresh") { Task { await controller.refreshDevices() } }
