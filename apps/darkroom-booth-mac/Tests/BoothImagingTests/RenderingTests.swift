@@ -4,9 +4,9 @@ import CoreGraphics
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
-import XCTest
+import Testing
 
-final class RenderingTests: XCTestCase {
+@Suite struct RenderingTests {
     private func solidImage(red: Double, green: Double, blue: Double, size: Int = 64) -> CGImage {
         let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -28,13 +28,13 @@ final class RenderingTests: XCTestCase {
 
     private func writeTemporary(_ image: CGImage) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        #expect(CGImageDestinationFinalize(destination))
         return url
     }
 
-    func testRendersPhotosIntoCellsAtPrintResolution() throws {
+    @Test func testRendersPhotosIntoCellsAtPrintResolution() throws {
         let red = try writeTemporary(solidImage(red: 1, green: 0, blue: 0))
         let blue = try writeTemporary(solidImage(red: 0, green: 0, blue: 1))
         defer { [red, blue].forEach { try? FileManager.default.removeItem(at: $0) } }
@@ -44,58 +44,57 @@ final class RenderingTests: XCTestCase {
         ])
         let image = try LayoutRenderer().render(layout, photos: [red, blue], effect: .color,
                                                 variables: TemplateVariables(), assetsDirectory: nil)
-        XCTAssertEqual(image.width, 200)
-        XCTAssertEqual(image.height, 300)
+        #expect(image.width == 200)
+        #expect(image.height == 300)
         let top = pixel(image, x: 100, y: 50)
         let bottom = pixel(image, x: 100, y: 250)
-        XCTAssertGreaterThan(top[0], 200)
-        XCTAssertLessThan(top[2], 50)
-        XCTAssertGreaterThan(bottom[2], 200)
-        XCTAssertLessThan(bottom[0], 50)
+        #expect(top[0] > 200)
+        #expect(top[2] < 50)
+        #expect(bottom[2] > 200)
+        #expect(bottom[0] < 50)
     }
 
-    func testMissingPhotoIsReported() {
+    @Test func testMissingPhotoIsReported() {
         let layout = PrintLayout.single4x6()
-        XCTAssertThrowsError(try LayoutRenderer().render(layout, photos: [], effect: .color,
-                                                         variables: TemplateVariables(), assetsDirectory: nil)) {
-            XCTAssertEqual($0 as? RenderError, .missingPhoto(1))
+        #expect(throws: RenderError.missingPhoto(1)) {
+            try LayoutRenderer().render(layout, photos: [], effect: .color, variables: TemplateVariables(), assetsDirectory: nil)
         }
     }
 
-    func testStripSheetPlacesTwoCopies() throws {
+    @Test func testStripSheetPlacesTwoCopies() throws {
         let strip = solidImage(red: 0, green: 1, blue: 0, size: 10)
         let sheet = try LayoutRenderer().sheet(repeating: strip, perSheet: 2)
-        XCTAssertEqual(sheet.width, 20)
-        XCTAssertEqual(sheet.height, 10)
+        #expect(sheet.width == 20)
+        #expect(sheet.height == 10)
     }
 
-    func testGrayscaleRemovesColour() throws {
+    @Test func testGrayscaleRemovesColour() throws {
         let input = CIImage(cgImage: solidImage(red: 1, green: 0, blue: 0))
         let output = ColorEffects.apply(.grayscale, to: input)
-        let rendered = try XCTUnwrap(CIContext().createCGImage(output, from: input.extent))
+        let rendered = try #require(CIContext().createCGImage(output, from: input.extent))
         let p = pixel(rendered, x: 10, y: 10)
-        XCTAssertLessThan(abs(Int(p[0]) - Int(p[1])), 8)
-        XCTAssertLessThan(abs(Int(p[1]) - Int(p[2])), 8)
+        #expect(abs(Int(p[0]) - Int(p[1])) < 8)
+        #expect(abs(Int(p[1]) - Int(p[2])) < 8)
     }
 
-    func testChromaKeyDropsGreenKeepsRed() {
-        XCTAssertEqual(ChromaKeyFilter.hue(red: 0, green: 1, blue: 0), 120, accuracy: 0.01)
+    @Test func testChromaKeyDropsGreenKeepsRed() {
+        #expect(abs((ChromaKeyFilter.hue(red: 0, green: 1, blue: 0)) - (120)) <= 0.01)
         let cube = ChromaKeyFilter.cubeData(for: ChromaKey())
         let floats = cube.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
         let size = 64
         func alpha(r: Int, g: Int, b: Int) -> Float { floats[((b * size + g) * size + r) * 4 + 3] }
-        XCTAssertEqual(alpha(r: 0, g: 63, b: 0), 0)
-        XCTAssertEqual(alpha(r: 63, g: 0, b: 0), 1)
-        XCTAssertEqual(alpha(r: 32, g: 32, b: 32), 1) // grey is never keyed
+        #expect(alpha(r: 0, g: 63, b: 0) == 0)
+        #expect(alpha(r: 63, g: 0, b: 0) == 1)
+        #expect(alpha(r: 32, g: 32, b: 32) == 1) // grey is never keyed
     }
 
-    func testGIFBoomerangFrameOrder() throws {
+    @Test func testGIFBoomerangFrameOrder() throws {
         let frames = (0..<4).map { _ in solidImage(red: 0, green: 0, blue: 0, size: 4) }
-        XCTAssertEqual(AnimationExporter.frames(frames, boomerang: true).count, 6)
+        #expect(AnimationExporter.frames(frames, boomerang: true).count == 6)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: url) }
         try AnimationExporter.writeGIF(frames, to: url, frameDelay: 0.2, boomerang: true)
-        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-        XCTAssertEqual(CGImageSourceGetCount(source), 6)
+        let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+        #expect(CGImageSourceGetCount(source) == 6)
     }
 }

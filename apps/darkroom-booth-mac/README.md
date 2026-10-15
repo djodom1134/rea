@@ -8,14 +8,14 @@ for what the Windows app does, recovered from its binaries.
 ## Requirements
 
 - macOS 14 or later
-- Xcode 15.3 or later (Swift 5.10)
+- Swift 6 toolchain: Xcode 16+ or the Command Line Tools (tests use swift-testing)
 - For dye-sub printers: [Gutenprint](https://gutenprint.sourceforge.io/) 5.3.4 or later, or the printer vendor's macOS driver, with the printer added in System Settings → Printers & Scanners
 
 ## Build and run
 
 ```bash
 cd apps/darkroom-booth-mac
-swift test                 # core, catalog, IPP and rendering tests
+swift test                 # swift-testing; should also run with only the Command Line Tools
 swift run DarkroomBooth    # operator window; "Start Booth Mode" opens the full-screen booth
 ```
 
