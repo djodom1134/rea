@@ -1,5 +1,6 @@
 @testable import BoothHardware
 @testable import BoothPrinting
+import Foundation
 import Testing
 
 @Suite struct IPPTests {

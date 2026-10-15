@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
+import Foundation
 import Testing
 
 @Suite struct RenderingTests {

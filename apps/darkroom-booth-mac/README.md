@@ -15,7 +15,7 @@ for what the Windows app does, recovered from its binaries.
 
 ```bash
 cd apps/darkroom-booth-mac
-swift test                 # swift-testing; should also run with only the Command Line Tools
+scripts/test.sh            # swift test; adds the Testing paths when only the Command Line Tools are installed
 swift run DarkroomBooth    # operator window; "Start Booth Mode" opens the full-screen booth
 ```
 

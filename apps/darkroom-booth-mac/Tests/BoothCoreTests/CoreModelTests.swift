@@ -1,4 +1,5 @@
 @testable import BoothCore
+import Foundation
 import Testing
 
 @Suite struct CoreModelTests {

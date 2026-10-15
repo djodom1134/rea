@@ -1,4 +1,5 @@
 @testable import BoothHardware
+import Foundation
 import Testing
 
 @Suite struct DeviceCatalogTests {
