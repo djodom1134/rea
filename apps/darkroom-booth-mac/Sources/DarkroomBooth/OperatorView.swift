@@ -30,6 +30,10 @@ struct OperatorView: View {
                     ForEach(controller.cameras) { camera in
                         Text(camera.name).tag(String?.some(camera.id))
                     }
+                    // Keep a saved camera selectable while it is unplugged or before devices load.
+                    if let saved = controller.configuration.cameraID, !controller.cameras.contains(where: { $0.id == saved }) {
+                        Text("Saved camera (not connected)").tag(String?.some(saved))
+                    }
                 }
                 ForEach(controller.tetheringNotes, id: \.self) { note in
                     Text(note).font(.caption).foregroundStyle(.secondary)
@@ -48,6 +52,9 @@ struct OperatorView: View {
                     ForEach(controller.printers) { printer in
                         Text(printer.makeAndModel.map { "\(printer.name) (\($0))" } ?? printer.name)
                             .tag(String?.some(printer.id))
+                    }
+                    if let saved = controller.configuration.printerName, !controller.printers.contains(where: { $0.id == saved }) {
+                        Text("\(saved) (not available)").tag(String?.some(saved))
                     }
                 }
                 if let status = controller.printerStatus {
