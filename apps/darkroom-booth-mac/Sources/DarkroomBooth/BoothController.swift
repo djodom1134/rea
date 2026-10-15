@@ -7,11 +7,14 @@ import BoothPrinting
 import CoreGraphics
 import Foundation
 import ImageIO
+import os
 
 /// Hosts the pure `SessionMachine`: owns timers, the camera, rendering,
 /// printing and the session log, and feeds results back as events.
 @MainActor
 final class BoothController: ObservableObject {
+    private static let logger = Logger(subsystem: "com.darkroombooth.mac", category: "devices")
+
     @Published var configuration = OperatorConfiguration.load() {
         didSet { configuration.save() }
     }
@@ -69,11 +72,18 @@ final class BoothController: ObservableObject {
         var found: [CameraDescriptor] = []
         for provider in providers { found += await provider.availableCameras() }
         cameras = found
+        let cameraList = found.map { $0.name + " [" + $0.backend.rawValue + "]" }.joined(separator: ", ")
+        Self.logger.info("cameras: \(cameraList, privacy: .public)")
+        for note in notes { Self.logger.info("camera backend: \(note, privacy: .public)") }
         do {
             printers = try await printerService.printers()
+            let printerList = printers.map(\.id).joined(separator: ", ")
+            Self.logger.info("printers: \(printerList, privacy: .public)")
             if configuration.printerName == nil { configuration.printerName = printers.first { $0.isDefault }?.id }
         } catch {
             printers = []
+            let reason = String(describing: error)
+            Self.logger.error("listing printers failed: \(reason, privacy: .public)")
             message = "Could not list printers: \(error.localizedDescription)"
         }
         await refreshPrinterStatus()
